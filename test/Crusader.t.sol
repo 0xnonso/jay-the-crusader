@@ -13,7 +13,11 @@ contract CrusaderTest is Test {
     }
 
     function testCrusade() public {
-        crusader.startCrusade(10000e6);
+        if(crusader.getJUniSpotPriceETH() > jay.JAYtoETH(1e18)){
+            crusader.startCrusade(5e18);
+        } else {
+            crusader.startCrusade(10000e6);
+        }
     }
     function testPrice() public {
         console.log(
