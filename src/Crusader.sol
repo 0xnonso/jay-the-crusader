@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import { UD60x18, ud, unwrap } from "prb-math/UD60x18.sol";
-import "forge-std/Test.sol";
 
 // Arb JAY <-> JAY/USDC UNIV2 Pool
 contract Crusader {
@@ -44,7 +43,7 @@ contract Crusader {
         bytes memory data = abi.encode(token0, token1);
         // last parameter tells whether its a normal swap or a flash swap
         IUniswapV2Pair(pair).swap(_amountIn, _amountOut, address(this), data);
-        console.log(IERC20(token1).balanceOf(address(this)));
+    
         IERC20(token1).transferFrom(
             address(this), 
             msg.sender,
