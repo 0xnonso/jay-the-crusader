@@ -14,12 +14,14 @@ contract CrusaderTest is Test {
     }
 
     function testCrusade() public {
+        uint256 initialBalance = address(this).balance;
         //vm.deal(address(crusader), 10e18);
         if(crusader.getJUniSpotPriceETH() > jay.JAYtoETH(1e18)){
             crusader.startCrusade(5e18);
         } else {
-            crusader.startCrusade(10000e6);
+            crusader.startCrusade(5000e6);
         }
+        console.log(initialBalance);
     }
     function testPrice() public {
         console.log(

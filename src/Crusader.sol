@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import { UD60x18, ud, unwrap } from "prb-math/UD60x18.sol";
-
+import "forge-std/Test.sol";
 
 // Arb JAY <-> JAY/USDC UNIV2 Pool
 contract Crusader {
@@ -28,13 +28,11 @@ contract Crusader {
         //   (((((( in  ,  out ))))))
         (address token0, address token1) = _tokens();
 
-         // check the pair contract for token borrow and weth exists
+         // get pair contract
         address pair = IUniswapV2Factory(factoryV2).getPair(
             token0,
             token1
         );
-
-        (, uint256 reserveOut) = UniswapV2Library.getReserves(factoryV2, token0, token1);
 
         (uint256 _amountIn, uint256 _amountOut) = token0 == IUniswapV2Pair(pair).token0()
             ? (amount, uint256(0))
@@ -43,18 +41,16 @@ contract Crusader {
         require(pair != address(0), "!pair");
 
         // need to pass some data to trigger uniswapv2call
-        bytes memory data = abi.encode(token0, token1, reserveOut);
+        bytes memory data = abi.encode(token0, token1);
         // last parameter tells whether its a normal swap or a flash swap
         IUniswapV2Pair(pair).swap(_amountIn, _amountOut, address(this), data);
-        // adding data triggers a flashloan
-
-        uint256 balanceOut = IERC20(token1).balanceOf(address(this));
-
+        console.log(IERC20(token1).balanceOf(address(this)));
         IERC20(token1).transferFrom(
             address(this), 
             msg.sender,
-            balanceOut
+            IERC20(token1).balanceOf(address(this))
         );
+        
     }
 
     // outputs either weth or usdc
@@ -63,28 +59,30 @@ contract Crusader {
         address token1,
         uint256 amountIn
     ) public {
-        address pair;
         if(token0 == usdc){
-            pair = IUniswapV2Factory(factoryV2).getPair(
-                token0,
+            // usdc -> jay -> eth 
+            (, uint256 realAfterBalance) = calculateSwapV2(
+                amountIn, 
+                IUniswapV2Factory(factoryV2).getPair(
+                    token0,
+                    address(jay)
+                ), 
+                token0, 
                 address(jay)
             );
-            // usdc -> jay -> eth 
-            (, uint256 realAfterBalance) = calculateSwapV2(amountIn, pair, token0, address(jay));
             _jayneth(address(jay), realAfterBalance);
             IWETH9(weth).deposit{value: address(this).balance}();
 
         } else {
-            pair = IUniswapV2Factory(factoryV2).getPair(
-                token1,
-                address(jay)
-            );
             //convert weth to eth
             // eth -> jay -> usdc
             IWETH9(weth).deposit{value: amountIn}();
             calculateSwapV2(
                 _jayneth(token0, amountIn), //unwrap
-                pair, 
+                IUniswapV2Factory(factoryV2).getPair(
+                    token1,
+                    address(jay)
+                ), 
                 address(jay), 
                 token1
             );
@@ -92,32 +90,26 @@ contract Crusader {
     }
 
     function uniswapV2Call(address sender, uint256 amount0, uint256 amount1, bytes calldata data) public {
-        address _token0 = IUniswapV2Pair(msg.sender).token0(); // fetch the address of token0
-        address _token1 = IUniswapV2Pair(msg.sender).token1(); // fetch the address of token1
-        address pair = IUniswapV2Factory(factoryV2).getPair(_token0, _token1);
+        address pair = IUniswapV2Factory(factoryV2).getPair(
+            IUniswapV2Pair(msg.sender).token0(), // fetch the address of token0
+            IUniswapV2Pair(msg.sender).token1()  // fetch the address of token1
+        );
         require(msg.sender == pair); // ensure that msg.sender is a V2 pair
-        
         require(sender == address(this));
 
-        (
-            address token0, 
-            address token1,
-            uint256 reserveOut
-        ) = abi.decode(data, (address, address, uint256));
+        (address token0, address token1) = abi.decode(data, (address, address));
 
         uint256 amount = amount0.max(amount1);
-
         (uint reserve0, uint reserve1,) = IUniswapV2Pair(pair).getReserves();
-
         uint256 amountOut = UniswapV2Library.getAmountIn(amount, reserve1, reserve0);
      
         jArb(token0, token1, amount);
 
         require(IERC20(token1).balanceOf(address(this)) > amountOut, "Sorry Jay: Still stuck in the trenches");
-
-        IERC20(token1).transfer(pair, amountOut);
+        IERC20(token1).transfer(pair, amountOut); // repay loan
     }
 
+    // https://github.com/mouseless-eth/rusty-sando/blob/master/contract/src/BrainDance.sol#L13
     function calculateSwapV2(
         uint amountIn, 
         address targetPair, 
@@ -132,20 +124,20 @@ contract Crusader {
         uint reserveOut;
 
         { // Avoid stack too deep error
-        (uint reserve0, uint reserve1,) = IUniswapV2Pair(targetPair).getReserves();
+            (uint reserve0, uint reserve1,) = IUniswapV2Pair(targetPair).getReserves();
 
-        // sort reserves
-        if (inputToken < outputToken) {
-            // Token0 is equal to inputToken
-            // Token1 is equal to outputToken
-            reserveIn = reserve0;
-            reserveOut = reserve1;
-        } else {
-            // Token0 is equal to outputToken
-            // Token1 is equal to inputToken
-            reserveIn = reserve1;
-            reserveOut = reserve0;
-        }
+            // sort reserves
+            if (inputToken < outputToken) {
+                // Token0 is equal to inputToken
+                // Token1 is equal to outputToken
+                reserveIn = reserve0;
+                reserveOut = reserve1;
+            } else {
+                // Token0 is equal to outputToken
+                // Token1 is equal to inputToken
+                reserveIn = reserve1;
+                reserveOut = reserve0;
+            }
         }
 
         // Find the actual amountIn sent to pair (accounts for tax if any) and amountOut
